@@ -5,7 +5,12 @@
 
 GyverOLED<SSH1106_128x64> oled;
 
-const float SENSOR_MAP[11][2] = {
+const int DISPLAY_WIDTH = 128;
+const int DISPLAY_HEIGHT = 64;
+
+const int SENSOR_MAP_SIZE = 11; 
+
+const float SENSOR_MAP[SENSOR_MAP_SIZE][2] = {
   {0.1, -0.1},
   {0.2, -0.08},
   {0.4, -0.06},
@@ -19,7 +24,6 @@ const float SENSOR_MAP[11][2] = {
   {2.17, 0.1}
 };
 
-const int SENSOR_MAP_SIZE = 11; 
 
 void setup() {
   Serial.begin(9600);
@@ -44,6 +48,7 @@ void updateDisplay(float volts){
   oled.print(volts);
   oled.println();
   oled.print(getPressureFromVolts(volts));
+  drawProgressBar(volts, 0.8, 1.2);
   oled.update();
 }
 
@@ -68,6 +73,19 @@ float getPressureFromVolts(float volts){
   float linCoef = (volts - SENSOR_MAP[target - 1][0]) / (SENSOR_MAP[target][0] - SENSOR_MAP[target - 1][0]);
   float res = ((SENSOR_MAP[target][1] - SENSOR_MAP[target - 1][1]) * linCoef) + SENSOR_MAP[target - 1][1];
   return res;
+}
+
+void drawProgressBar(float value, float min, float max){
+  static int prev_x = 0;
+  float coef = (value - min) / (max - min);
+  float current_progress_x = DISPLAY_WIDTH * coef;
+  Serial.println(current_progress_x);
+  if (abs(prev_x - current_progress_x) > 3.0){
+    oled.rect(0, 50, current_progress_x, 60);
+    prev_x = current_progress_x;
+  } else {
+    oled.rect(0, 50, prev_x, 60);
+  }
 }
 
 void blinkLED() {
