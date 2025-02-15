@@ -1,12 +1,11 @@
-#include <charMap.h>
 #include <GyverOLED.h>
-#include <icons_7x7.h>
-#include <icons_8x8.h>
 
 GyverOLED<SSH1106_128x64> oled;
 
 const int DISPLAY_WIDTH = 128;
 const int DISPLAY_HEIGHT = 64;
+const float BAR_MIN = 0.8;
+const float BAR_MAX = 3.3;
 
 const int SENSOR_MAP_SIZE = 21; 
 
@@ -36,36 +35,42 @@ const float SENSOR_MAP[SENSOR_MAP_SIZE][2] = {
 
 
 void setup() {
-  Serial.begin(9600);
+  //Serial.begin(9600);
   oled.init(0x3C);
-  
+  //oled.invertDisplay(1);
 
   pinMode(LED_BUILTIN, OUTPUT);
 }
 
 void loop() {
   static unsigned long timer;
-  float volts = readVolts();
+  int readFromAnalog = analogRead(A0);
+  float volts = convertToVolts(readFromAnalog);
   if (millis() - timer > 50){
-    updateDisplay(volts);
-    Serial.println(volts);
+    updateDisplay(volts, readFromAnalog);
+    //Serial.println(volts);
   }
 } 
 
-void updateDisplay(float volts){
+void updateDisplay(float volts, int rawAnalog){
   oled.clear();
   oled.home();
   oled.print(volts);
-  oled.println(" V");
+  oled.println(" Volts");
   oled.print(getPressureFromVolts(volts));
-  oled.print(" Bars");
-  drawProgressBar(volts, 0.8, 3.3);
+  oled.println(" Bars");
+  oled.print(rawAnalog);
+  oled.print(" raw");
+  drawProgressBar(volts, BAR_MIN, BAR_MAX);
+  oled.setCursor(0, 7);
+  oled.print(BAR_MIN);
+  oled.setCursor(100, 7);
+  oled.print(BAR_MAX);
   oled.update();
 }
 
-float readVolts(){
-  int readFromAnalog = analogRead(A0);
-  float volt = (float)(readFromAnalog * 5.0) / 1024;
+float convertToVolts(int x){
+  float volt = (float)(x * 5.0) / 1024;
   return volt;
 }
 
@@ -90,20 +95,13 @@ void drawProgressBar(float value, float min, float max){
   static int prev_x = 0;
   float coef = (value - min) / (max - min);
   float current_progress_x = DISPLAY_WIDTH * coef;
-  Serial.println(current_progress_x);
+  //Serial.println(current_progress_x);
   // if (abs(prev_x - current_progress_x) > 3.0){
   //   oled.rect(0, 50, current_progress_x, 60);
   //   prev_x = current_progress_x;
   // } else {
   //   oled.rect(0, 50, prev_x, 60);
   // }
-  oled.rect(0, 50, current_progress_x, 60);
+  oled.rect(0, 40, current_progress_x, 50);
 
 }
-
-void blinkLED() {
-  digitalWrite(LED_BUILTIN, HIGH);  
-  delay(1000);                      
-  digitalWrite(LED_BUILTIN, LOW);   
-  delay(1000);      
-}                
