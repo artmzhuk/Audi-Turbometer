@@ -7,9 +7,21 @@ const int DISPLAY_HEIGHT = 64;
 const float BAR_MIN = 0.8;
 const float BAR_MAX = 3.3;
 
-const int SENSOR_MAP_SIZE = 21; 
-
+const int SENSOR_MAP_SIZE = 10; 
 const float SENSOR_MAP[SENSOR_MAP_SIZE][2] = {
+  {25, -1},
+  {45, -0.8},
+  {202, 0},
+  {302, 0.5},
+  {399, 1.0},
+  {457, 1.3},
+  {516, 1.6},
+  {554, 1.8},
+  {595, 2.0},
+  {791, 3.0}
+};
+
+/* const float SENSOR_MAP[SENSOR_MAP_SIZE][2] = {
   {0.1, -1},
   {0.2, -0.8},
   {0.4, -0.6},
@@ -32,6 +44,7 @@ const float SENSOR_MAP[SENSOR_MAP_SIZE][2] = {
   {4.27, 2.8},
   {4.5, 3.0}
 };
+*/
 
 
 void setup() {
@@ -57,7 +70,7 @@ void updateDisplay(float volts, int rawAnalog){
   oled.home();
   oled.print(volts);
   oled.println(" Volts");
-  oled.print(getPressureFromVolts(volts));
+  oled.print(getPressureFromAnalog(rawAnalog));
   oled.println(" Bars");
   oled.print(rawAnalog);
   oled.print(" raw");
@@ -74,19 +87,19 @@ float convertToVolts(int x){
   return volt;
 }
 
-float getPressureFromVolts(float volts){
-  if (volts > SENSOR_MAP[SENSOR_MAP_SIZE - 1][0]){
+float getPressureFromAnalog(int x){
+  if (x > SENSOR_MAP[SENSOR_MAP_SIZE - 1][0]){
     return SENSOR_MAP[SENSOR_MAP_SIZE][1];
   }
 
   int target = 0;
   for (int i = 1; i < SENSOR_MAP_SIZE; i++){
-    if (SENSOR_MAP[i][0] > volts){
+    if (SENSOR_MAP[i][0] > x){
       target = i;
       break;
     }
   }
-  float linCoef = (volts - SENSOR_MAP[target - 1][0]) / (SENSOR_MAP[target][0] - SENSOR_MAP[target - 1][0]);
+  float linCoef = (x - SENSOR_MAP[target - 1][0]) / (SENSOR_MAP[target][0] - SENSOR_MAP[target - 1][0]);
   float res = ((SENSOR_MAP[target][1] - SENSOR_MAP[target - 1][1]) * linCoef) + SENSOR_MAP[target - 1][1];
   return res;
 }
