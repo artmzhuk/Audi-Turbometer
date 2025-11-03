@@ -180,24 +180,27 @@ void loop() {
 
 void updateDisplay(int rawAnalog){
   float volts = convertToVolts(rawAnalog);
-  int currentPercent = (int) (((float)rawAnalog / 1023.0) * 100);
+  int currentPercent;
+  if (rawAnalog - 202.0 >= 0){
+    currentPercent = (int) ((((float)rawAnalog - 202.0) / 197.0) * 100); // bar limit is 1 bar, 0 percent is atmo, 255 percent is negative pressure
+  } else {
+    currentPercent = 255;
+  }
   float currentPressure = getPressureFromAnalog(rawAnalog);
   
   // Строка 0: символы + текущее давление
   lcd.setCursor(0, 0);
-  lcd.write(6);
-  lcd.write(7);
+  lcd.write(4);  // left
+  lcd.write(5);  // right
   lcd.print(" ");
   
   // Форматируем текущее давление (фиксированная ширина)
   if (currentPressure >= 0.0){
     lcd.print(" "); // пробел для выравнивания
   }
-  lcd.print(currentPressure, 2); // 2 знака после запятой
-  lcd.print("    "); // очистка остатков
-  
+  lcd.print(currentPressure, 2); // 2 знака после запятой  
   // Строка 1: прогресс-бар или другая информация
-  //fillBar2(0, 1, 16, currentPercent);
+  fillBar2(8, 1, 8, currentPercent);
 }
 
 void updateMax(float maxValue){
@@ -243,21 +246,17 @@ void initBar2() {
   // необходимые символы для работы
   // создано в http://maxpromer.github.io/LCD-Character-Creator/
   byte right_empty[8] = {0b11111,  0b00001,  0b00001,  0b00001,  0b00001,  0b00001,  0b00001,  0b11111};
-  byte left_empty[8] = {0b11111,  0b10000,  0b10000,  0b10000,  0b10000,  0b10000,  0b10000,  0b11111};
   byte center_empty[8] = {0b11111, 0b00000,  0b00000,  0b00000,  0b00000,  0b00000,  0b00000,  0b11111};
   byte left_full[8] = {0b11111, 0b10000, 0b10111, 0b10111, 0b10111, 0b10111, 0b10000, 0b11111};
-  byte right_full[8] = {0b11111, 0b00001, 0b11101, 0b11101, 0b11101, 0b11101, 0b00001, 0b11111};
   byte center_full[8] = {0b11111, 0b00000, 0b11111, 0b11111, 0b11111, 0b11111, 0b00000, 0b11111};
   byte left[] = {0x00, 0x03, 0x04, 0x05, 0x05, 0x04, 0x03, 0x00};
   byte right[] = { 0x01,0x1F, 0x05, 0x14, 0x14, 0x04, 0x18, 0x00};
-  lcd.createChar(0, left_empty);
-  lcd.createChar(1, center_empty);
-  lcd.createChar(2, right_empty);
-  lcd.createChar(3, left_full);
-  lcd.createChar(4, center_full);
-  lcd.createChar(5, right_full);
-  lcd.createChar(6, left);
-  lcd.createChar(7, right);
+  lcd.createChar(0, center_empty);
+  lcd.createChar(1, right_empty);
+  lcd.createChar(2, left_full);
+  lcd.createChar(3, center_full);
+  lcd.createChar(4, left);
+  lcd.createChar(5, right);
 }
 
 //fillBar2 принимает аргументы (столбец, строка, длина полосы, значение в % (0 - 100) )
@@ -265,14 +264,18 @@ void fillBar2(byte start_pos, byte row, byte bar_length, byte fill_percent) {
   Serial.println(fill_percent);
   byte infill = round((float)bar_length * fill_percent / 100);
   lcd.setCursor(start_pos, row);
-  if (infill == 0) lcd.write(0);
-  else lcd.write(3);
-  for (int n = 1; n < bar_length - 1; n++) {
-    if (n < infill) lcd.write(4);
-    if (n >= infill) lcd.write(1);
+  lcd.write(2);   // left_full
+  if (fill_percent == 255){
+    infill = 0;
+    lcd.write(0);
+  } else {
+    lcd.write(3);
   }
-  if (infill == bar_length) lcd.write(5);
-  else lcd.write(2);
+  for (int n = 1; n < bar_length - 2; n++) {
+    if (n < infill) lcd.write(3);  // center_full
+    if (n >= infill) lcd.write(0);  // center_empty
+  }
+  lcd.write(1);  // right_empty
 }
 
 
