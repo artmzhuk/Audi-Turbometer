@@ -1,5 +1,7 @@
 #include <Wire.h>
 #include <LiquidCrystal_I2C.h>
+#include <string.h>
+
 
 const int  MAX_VAL_PERIOD_SEC = 30;
 const float BAR_MIN = 0.8;
@@ -146,6 +148,8 @@ void loop() {
   static byte lastOnReading = 0;
   static unsigned long lastOffDebounceTime;
   static unsigned long lastOnDebounceTime;
+  static unsigned long lastExhaustStateChangeTime;
+  static char exhaustString[] = "     ";
 
   int readFromAnalog = analogRead(A0);
   float currentPressure = getPressureFromAnalog(readFromAnalog);
@@ -187,7 +191,14 @@ void loop() {
   }
   
   if (millis() - displayTimer > 50){
-    updateDisplay(readFromAnalog, currentExhaustShowState);
+    if (millis() - lastExhaustStateChangeTime < 10 * 1000 && currentExhaustShowState == true){
+      strcpy(exhaustString, "SPORT");
+    } else if (millis() - lastExhaustStateChangeTime < 3 * 1000 && currentExhaustShowState == false){
+      strcpy(exhaustString, "  OFF");
+    } else {
+      strcpy(exhaustString, "     ");
+    }
+    updateDisplay(readFromAnalog, currentExhaustShowState, exhaustString);
     displayTimer = millis();
   }
 
@@ -204,6 +215,7 @@ void loop() {
   if (millis() - lastOffDebounceTime > EXHAUST_BUTTON_THRESHOLD) {
     if (!exhaustOffIsPressed && currentOffReading == 1){
       currentExhaustShowState = false;
+      lastExhaustStateChangeTime = millis();
       exhaustOffIsPressed = true;
     }
   }
@@ -222,6 +234,7 @@ void loop() {
   if (millis() - lastOnDebounceTime > EXHAUST_BUTTON_THRESHOLD) {
     if (!exhaustOnIsPressed && currentOnReading == 1){
       currentExhaustShowState = true;
+      lastExhaustStateChangeTime = millis();
       exhaustOnIsPressed = true;
     }
   }
@@ -229,7 +242,7 @@ void loop() {
 } 
 
 
-void updateDisplay(int rawAnalog, bool currentExhaustShowState){
+void updateDisplay(int rawAnalog, bool currentExhaustShowState, char* exhaustString){
   float volts = convertToVolts(rawAnalog);
   int currentPercent;
   if (rawAnalog - 202.0 >= 0){
@@ -251,6 +264,9 @@ void updateDisplay(int rawAnalog, bool currentExhaustShowState){
   }
   lcd.print(currentPressure, 2); // 2 знака после запятой  
   fillBar2(8, 0, 8, currentPercent);
+  lcd.setCursor(9, 1);
+  lcd.print(exhaustString);
+
   lcd.setCursor(14, 1);
   if (currentExhaustShowState == true) {
     lcd.write(6);  // left
