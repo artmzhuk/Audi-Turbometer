@@ -4,6 +4,10 @@
 const int  MAX_VAL_PERIOD_SEC = 30;
 const float BAR_MIN = 0.8;
 const float BAR_MAX = 3.3;
+const int EXHAUST_BUTTON_THRESHOLD = 300; // ms
+const int EXHAUST_ON_PIN = 3; //D3
+const int EXHAUST_OFF_PIN = 7; //D7
+
 
 struct dStack *Q = NULL;
 struct dStack *D = NULL;
@@ -112,6 +116,8 @@ void setup() {
   
   initBar2();
   pinMode(LED_BUILTIN, OUTPUT);
+  pinMode(EXHAUST_ON_PIN, INPUT);
+  pinMode(EXHAUST_OFF_PIN, INPUT);
   
   initializeQ(&Q, &D);
   
@@ -132,7 +138,15 @@ void loop() {
   static unsigned long displayTimer;
   static unsigned long queueTimer;
   static bool firstRun = true;
-  
+
+  static bool currentExhaustShowState = false;
+  static bool exhaustOnIsPressed = false;
+  static bool exhaustOffIsPressed = false;
+  static byte lastOffReading = 0;
+  static byte lastOnReading = 0;
+  static unsigned long lastOffDebounceTime;
+  static unsigned long lastOnDebounceTime;
+
   int readFromAnalog = analogRead(A0);
   float currentPressure = getPressureFromAnalog(readFromAnalog);
   
@@ -173,12 +187,49 @@ void loop() {
   }
   
   if (millis() - displayTimer > 50){
-    updateDisplay(readFromAnalog);
+    updateDisplay(readFromAnalog, currentExhaustShowState);
     displayTimer = millis();
   }
+
+  // ======= debounce logic 
+
+  byte currentOffReading = digitalRead(EXHAUST_OFF_PIN);
+  if (currentOffReading == 0){
+    exhaustOffIsPressed = false;
+  }
+  if (currentOffReading != lastOffReading) {
+    lastOffDebounceTime = millis();
+  }
+
+  if (millis() - lastOffDebounceTime > EXHAUST_BUTTON_THRESHOLD) {
+    if (!exhaustOffIsPressed && currentOffReading == 1){
+      currentExhaustShowState = false;
+      exhaustOffIsPressed = true;
+    }
+  }
+  lastOffReading = currentOffReading;
+
+
+
+  byte currentOnReading = digitalRead(EXHAUST_ON_PIN);
+  if (currentOnReading == 0){
+    exhaustOnIsPressed = false;
+  }
+  if (currentOnReading != lastOnReading) {
+    lastOnDebounceTime = millis();
+  }
+
+  if (millis() - lastOnDebounceTime > EXHAUST_BUTTON_THRESHOLD) {
+    if (!exhaustOnIsPressed && currentOnReading == 1){
+      currentExhaustShowState = true;
+      exhaustOnIsPressed = true;
+    }
+  }
+  lastOnReading = currentOnReading;
 } 
 
-void updateDisplay(int rawAnalog){
+
+void updateDisplay(int rawAnalog, bool currentExhaustShowState){
   float volts = convertToVolts(rawAnalog);
   int currentPercent;
   if (rawAnalog - 202.0 >= 0){
@@ -199,8 +250,14 @@ void updateDisplay(int rawAnalog){
     lcd.print(" "); // пробел для выравнивания
   }
   lcd.print(currentPressure, 2); // 2 знака после запятой  
-  // Строка 1: прогресс-бар или другая информация
-  fillBar2(8, 1, 8, currentPercent);
+  fillBar2(8, 0, 8, currentPercent);
+  lcd.setCursor(14, 1);
+  if (currentExhaustShowState == true) {
+    lcd.write(6);  // left
+    lcd.write(7); 
+  } else {
+    lcd.print("  ");
+  }
 }
 
 void updateMax(float maxValue){
@@ -209,14 +266,14 @@ void updateMax(float maxValue){
   if (qError != 0){
     lcd.print("Error: E");
     lcd.print(qError);
-    lcd.print("       "); // очистка остатков
+    //lcd.print("       "); // очистка остатков
   } else {
     lcd.print("MAX:");
     if (maxValue < 0.0){
       maxValue = 0.0;
     }
     lcd.print(maxValue, 2); // 2 знака после запятой
-    lcd.print("       "); // очистка остатков
+    //lcd.print("       "); // очистка остатков
   }
 }
 
@@ -251,12 +308,16 @@ void initBar2() {
   byte center_full[8] = {0b11111, 0b00000, 0b11111, 0b11111, 0b11111, 0b11111, 0b00000, 0b11111};
   byte left[] = {0x00, 0x03, 0x04, 0x05, 0x05, 0x04, 0x03, 0x00};
   byte right[] = { 0x01,0x1F, 0x05, 0x14, 0x14, 0x04, 0x18, 0x00};
+  byte trombon_left[] = { 0x01, 0x03, 0x07, 0x06, 0x06, 0x00, 0x0A, 0x12};
+  byte trombon_right[] = { 0x10, 0x18, 0x1C, 0x0C, 0x0C, 0x00, 0x0A, 0x09};
   lcd.createChar(0, center_empty);
   lcd.createChar(1, right_empty);
   lcd.createChar(2, left_full);
   lcd.createChar(3, center_full);
   lcd.createChar(4, left);
   lcd.createChar(5, right);
+  lcd.createChar(6, trombon_left);
+  lcd.createChar(7, trombon_right);
 }
 
 //fillBar2 принимает аргументы (столбец, строка, длина полосы, значение в % (0 - 100) )
