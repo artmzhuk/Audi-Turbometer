@@ -1,6 +1,5 @@
 #include <Wire.h>
 #include <LiquidCrystal_I2C.h>
-#include <stdio.h>
 
 const int  MAX_VAL_PERIOD_SEC = 30;
 const float BAR_MIN = 0.8;
@@ -58,59 +57,123 @@ const float SENSOR_MAP[SENSOR_MAP_SIZE][2] = {
   {791, 3.0}
 };
 
-void initializeQ(struct dStack *Q, struct dStack *D){
-  int sizeOfStack = 120;
-  Q = (dStack*)malloc(sizeof(struct dStack));
-  D = (dStack*)malloc(sizeof(struct dStack));
-  float* dataQ = (float*)calloc(sizeOfStack, sizeof(float));
-  float* dataD = (float*)calloc(sizeOfStack, sizeof(float));
-  if(!(dataQ && dataD && Q && D)){ // checking mallocs
+void initializeQ(struct dStack **Q, struct dStack **D){
+  int sizeOfStack = MAX_VAL_PERIOD_SEC + 5;
+  
+  Serial.print("Allocating memory for stacks, size: ");
+  Serial.println(sizeOfStack);
+  
+  *Q = (dStack*)malloc(sizeof(struct dStack));
+  if(*Q == NULL){
+    Serial.println("ERROR: malloc Q failed");
     qError = 1;
+    return;
+  }
+  
+  *D = (dStack*)malloc(sizeof(struct dStack));
+  if(*D == NULL){
+    Serial.println("ERROR: malloc D failed");
+    qError = 1;
+    return;
+  }
+  
+  float* dataQ = (float*)calloc(sizeOfStack, sizeof(float));
+  if(dataQ == NULL){
+    Serial.println("ERROR: calloc dataQ failed");
+    qError = 1;
+    return;
+  }
+  
+  float* dataD = (float*)calloc(sizeOfStack, sizeof(float));
+  if(dataD == NULL){
+    Serial.println("ERROR: calloc dataD failed");
+    qError = 1;
+    return;
   } 
-  initStack(Q, sizeOfStack, dataQ);
-  initStack(D, sizeOfStack, dataD);
-  Q->numElems = 0;
+  
+  Serial.println("Memory allocation successful!");
+  initStack(*Q, sizeOfStack, dataQ);
+  initStack(*D, sizeOfStack, dataD);
+  (*Q)->numElems = 0;
+  Serial.println("Stack initialization complete");
 }
 
 void setup() {
   Serial.begin(9600);
+  delay(1000); // Задержка для инициализации Serial порта
+  Serial.println("=== Audi Turbometer Starting ===");
+  
   lcd.init();
   lcd.begin(16, 2);
   lcd.backlight();
   lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("Initializing...");
+  
   initBar2();
   pinMode(LED_BUILTIN, OUTPUT);
-  initializeQ(Q, D); 
+  
+  initializeQ(&Q, &D);
+  
+  if(qError == 0){
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("Ready!");
+    delay(500);
+    lcd.clear();
+    Serial.println("=== Setup Complete ===");
+  } else {
+    lcd.setCursor(0, 1);
+    lcd.print("Init Error!");
+  }
 }
 
 void loop() {
-  //Serial.println("loop");
   static unsigned long displayTimer;
   static unsigned long queueTimer;
+  static bool firstRun = true;
+  
   int readFromAnalog = analogRead(A0);
   float currentPressure = getPressureFromAnalog(readFromAnalog);
   
   if (millis() - queueTimer > 1000){
-    Serial.print("in queue timer");
     // сюда заходим раз в секунду
-    Enqueue(Q, D, maxPressInSec);
-    Serial.print("ENQ");
-    Serial.print(maxPressInSec);
-    Serial.println(Q->numElems);
-    if (Q->numElems > MAX_VAL_PERIOD_SEC){
-       Dequeue(Q, D);
+    if(Q != NULL && D != NULL){
+      if(firstRun){
+        Serial.println("First enqueue operation");
+        firstRun = false;
+      }
+      
+      Enqueue(Q, D, maxPressInSec);
+      Serial.print("ENQ: val=");
+      Serial.print(maxPressInSec, 2);
+      Serial.print(" | qSize=");
+      Serial.print(Q->numElems);
+      
+      if (Q->numElems > MAX_VAL_PERIOD_SEC){
+         float dequeued = Dequeue(Q, D);
+         Serial.print(" | DEQ=");
+         Serial.print(dequeued, 2);
+      }
+      
+      float maxVal = Maximum(D);
+      Serial.print(" | MAX=");
+      Serial.println(maxVal, 2);
+      
+      updateMax(maxVal);
+    } else {
+      Serial.println("ERROR: Q or D is NULL in loop");
     }
-    updateMax(Maximum(D));
     maxPressInSec = 0;
     queueTimer = millis();
   }
+  
   if (currentPressure > maxPressInSec){
     maxPressInSec = currentPressure;
   }
   
   if (millis() - displayTimer > 50){
     updateDisplay(readFromAnalog);
-    //Serial.println(volts);
     displayTimer = millis();
   }
 } 
@@ -119,37 +182,38 @@ void updateDisplay(int rawAnalog){
   float volts = convertToVolts(rawAnalog);
   int currentPercent = (int) (((float)rawAnalog / 1023.0) * 100);
   float currentPressure = getPressureFromAnalog(rawAnalog);
-  lcd.setCursor(0,0);
+  
+  // Строка 0: символы + текущее давление
+  lcd.setCursor(0, 0);
   lcd.write(6);
   lcd.write(7);
+  lcd.print(" ");
+  
+  // Форматируем текущее давление (фиксированная ширина)
   if (currentPressure >= 0.0){
-    lcd.print(" ");
-  } else {
-    int floatTail = (int)(currentPressure * -100.0);
-    //lcd.print("-");
-    //lcd.print(floatTail);
+    lcd.print(" "); // пробел для выравнивания
   }
-  Serial.print("currPressure");
-  Serial.println(rawAnalog);
-  lcd.print(currentPressure);
-  //lcd.print("0.25");
-  lcd.print(" MAX:");
-  //lcd.print("0.89");
-  //Serial.print(rawAnalog);
-  Serial.print("->");
-  //Serial.println(currentPercent);
+  lcd.print(currentPressure, 2); // 2 знака после запятой
+  lcd.print("    "); // очистка остатков
+  
+  // Строка 1: прогресс-бар или другая информация
   //fillBar2(0, 1, 16, currentPercent);
 }
 
 void updateMax(float maxValue){
-  lcd.setCursor(1, 1);
+  // Выводим MAX на второй строке
+  lcd.setCursor(0, 1);
   if (qError != 0){
-    lcd.print("E");
+    lcd.print("Error: E");
     lcd.print(qError);
+    lcd.print("       "); // очистка остатков
   } else {
-    Serial.print("maxValue:");
-    Serial.println(maxValue);
-    //lcd.print(maxValue);
+    lcd.print("MAX:");
+    if (maxValue < 0.0){
+      maxValue = 0.0;
+    }
+    lcd.print(maxValue, 2); // 2 знака после запятой
+    lcd.print("       "); // очистка остатков
   }
 }
 
@@ -234,16 +298,18 @@ int stackEmpty2(struct dStack *s) {
 }
 
 void push1(struct dStack *s, float x) {
-    if(s->top2 < s->top1)
-        printf("overflow");
+    if(s->top2 < s->top1){
+        Serial.println("push1 overflow");
+        return;
+    }
     s->data[s->top1] = x;
     s->top1 += 1;
 }
 
 void push2(struct dStack *s, float x) {
     if(s->top2 < s->top1){
-              printf("overflow");
-      Serial.println("push2 ovflow");
+        Serial.println("push2 overflow");
+        return;
     }
     s->data[s->top2] = x;
     s->top2 -= 1;
@@ -251,8 +317,8 @@ void push2(struct dStack *s, float x) {
 
 float pop1(struct dStack *s) {
     if(stackEmpty1(s) == 1){
-              printf("empty");
-        Serial.println("pop1 empty");
+        Serial.println("ERROR: pop1 empty");
+        return 0.0;
     }
     s->top1 -= 1;
     float x = s->data[s->top1];
@@ -260,10 +326,12 @@ float pop1(struct dStack *s) {
 }
 
 float pop2(struct dStack *s) {
-    if (stackEmpty2(s) == 1)
-        printf("empty");
+    if (stackEmpty2(s) == 1){
+        Serial.println("ERROR: pop2 empty");
+        return 0.0;
+    }
     s->top2 += 1;
-    long x = s->data[s->top2];
+    float x = s->data[s->top2];
     return x;
 }
 
@@ -316,27 +384,27 @@ float popFrontDeque(struct dStack *D) {
 }
 
 void Enqueue(struct dStack *Q, struct dStack *D, float x) {
+    if(Q == NULL || D == NULL){
+        Serial.println("ERROR: Q or D is NULL");
+        qError = 3;
+        return;
+    }
+    
     if(queueEmpty(Q) == 1){
         push1(Q, x);
         push2(D, x);
     }
     else{
-      Serial.println("ENQ func 1");
         push1(Q, x);
         while((getRearElementDeq(D) < x) && (queueEmpty(D) == 0)){
-          Serial.println(x);
-          Serial.println(getRearElementDeq(D) );
-          Serial.println("ENQ func 2");
             if(stackEmpty2(D) == 0){
-              Serial.println("ENQ func 3");
                 pop2(D);
             } else{
-              Serial.println("ENQ func 4");
-                while(stackEmpty1(D) == 0){
-                  Serial.println("ENQ func 5");
+                // Перемещаем один элемент из stack1 в stack2, затем pop
+                if(stackEmpty1(D) == 0){
                     push2(D, pop1(D));
+                    pop2(D);
                 }
-                pop2(D);
             }
         }
         push2(D, x);
@@ -346,9 +414,14 @@ void Enqueue(struct dStack *Q, struct dStack *D, float x) {
 
 float Dequeue(struct dStack *Q, struct dStack *D) {
     float res;
+    if(Q == NULL || D == NULL){
+        Serial.println("ERROR: Q or D is NULL in Dequeue");
+        qError = 3;
+        return 0.0;
+    }
     if (Q->numElems == 0){
       qError = 2;
-      Serial.print("error 2");
+      Serial.println("ERROR: Queue is empty");
       return 0.0;
     }
     if(getFirstElementDeq(D) == getFirstElementQue(Q)){
@@ -362,5 +435,13 @@ float Dequeue(struct dStack *Q, struct dStack *D) {
 }
 
 float Maximum(struct dStack *D) {
+    if(D == NULL){
+        Serial.println("ERROR: D is NULL in Maximum");
+        qError = 3;
+        return 0.0;
+    }
+    if(queueEmpty(D) == 1){
+        return 0.0;
+    }
     return getFirstElementDeq(D);
 }
