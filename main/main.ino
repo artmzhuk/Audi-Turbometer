@@ -118,8 +118,8 @@ void setup() {
   
   initBar2();
   pinMode(LED_BUILTIN, OUTPUT);
-  pinMode(EXHAUST_ON_PIN, INPUT);
-  pinMode(EXHAUST_OFF_PIN, INPUT);
+  pinMode(EXHAUST_ON_PIN, INPUT_PULLUP);
+  pinMode(EXHAUST_OFF_PIN, INPUT_PULLUP);
   
   initializeQ(&Q, &D);
   
@@ -205,7 +205,7 @@ void loop() {
   // ======= debounce logic 
 
   byte currentOffReading = digitalRead(EXHAUST_OFF_PIN);
-  if (currentOffReading == 0){
+  if (currentOffReading == 1){
     exhaustOffIsPressed = false;
   }
   if (currentOffReading != lastOffReading) {
@@ -213,7 +213,7 @@ void loop() {
   }
 
   if (millis() - lastOffDebounceTime > EXHAUST_BUTTON_THRESHOLD) {
-    if (!exhaustOffIsPressed && currentOffReading == 1){
+    if (!exhaustOffIsPressed && currentOffReading == 0){
       currentExhaustShowState = false;
       lastExhaustStateChangeTime = millis();
       exhaustOffIsPressed = true;
@@ -224,7 +224,7 @@ void loop() {
 
 
   byte currentOnReading = digitalRead(EXHAUST_ON_PIN);
-  if (currentOnReading == 0){
+  if (currentOnReading == 1){
     exhaustOnIsPressed = false;
   }
   if (currentOnReading != lastOnReading) {
@@ -232,7 +232,7 @@ void loop() {
   }
 
   if (millis() - lastOnDebounceTime > EXHAUST_BUTTON_THRESHOLD) {
-    if (!exhaustOnIsPressed && currentOnReading == 1){
+    if (!exhaustOnIsPressed && currentOnReading == 0){
       currentExhaustShowState = true;
       lastExhaustStateChangeTime = millis();
       exhaustOnIsPressed = true;
