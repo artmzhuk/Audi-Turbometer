@@ -11,41 +11,32 @@ const int EXHAUST_ON_PIN = 3; //D3
 const int EXHAUST_OFF_PIN = 7; //D7
 
 
-struct dStack *Q = NULL;
-struct dStack *D = NULL;
+// Структура для кольцевой очереди с поиском максимума
+struct CircularQueue {
+    float* values;      // Массив значений
+    int* maxDeque;      // Дек индексов для поиска максимума (кольцевой)
+    int capacity;       // Размер буфера
+    int qHead;          // Голова очереди значений
+    int qTail;          // Хвост очереди значений
+    int qSize;          // Текущий размер очереди
+    int dHead;          // Голова дека максимумов
+    int dTail;          // Хвост дека максимумов
+};
+
+struct CircularQueue *queue = NULL;
 int qError = 0;
 
 float maxPressInSec = 0;
 
-
-struct dStack{
-    float* data;
-    int numElems;
-    long cap, top1, top2;
-};
-
-
-/*
-vvvvvvvvvvvvvvvvvvvvvvv*/
-void initStack(struct dStack *s, long nel, float *data);
-int stackEmpty1(struct dStack* s);
-int stackEmpty2(struct dStack* s);
-void push1(struct dStack* s, float x);
-void push2(struct dStack* s, float x);
-float pop1(struct dStack* s);
-float pop2(struct dStack* s);
-int queueEmpty(struct dStack* s);
-float popQueue(struct dStack* s);
-/*deque functions
-vvvvvvvvvvvvvvvvvvvvvvv*/
-float getRearElementDeq(struct dStack* D);
-float getFirstElementDeq(struct dStack* D);
-float getFirstElementQue(struct dStack* Q);
-float popFrontDeque(struct dStack* D);
-void Enqueue(struct dStack* Q, struct dStack* D, float x);
-float Dequeue(struct dStack* Q, struct dStack* D);
-float Maximum(struct dStack* D);
-/*vvvvvvvvvvvvvvvvvvvvvvvv*/
+// Прототипы функций
+void initCircularQueue(struct CircularQueue **q, int capacity);
+void freeCircularQueue(struct CircularQueue *q);
+int isQueueEmpty(struct CircularQueue *q);
+int isQueueFull(struct CircularQueue *q);
+void enqueue(struct CircularQueue *q, float value);
+float dequeue(struct CircularQueue *q);
+float getMaximum(struct CircularQueue *q);
+int getQueueSize(struct CircularQueue *q);
 
 LiquidCrystal_I2C lcd(0x27 , 16, 2);
 
@@ -63,45 +54,52 @@ const float SENSOR_MAP[SENSOR_MAP_SIZE][2] = {
   {791, 3.0}
 };
 
-void initializeQ(struct dStack **Q, struct dStack **D){
-  int sizeOfStack = MAX_VAL_PERIOD_SEC + 5;
+void initCircularQueue(struct CircularQueue **q, int capacity) {
+  Serial.print("Allocating memory for circular queue, capacity: ");
+  Serial.println(capacity);
   
-  Serial.print("Allocating memory for stacks, size: ");
-  Serial.println(sizeOfStack);
-  
-  *Q = (dStack*)malloc(sizeof(struct dStack));
-  if(*Q == NULL){
-    Serial.println("ERROR: malloc Q failed");
+  *q = (struct CircularQueue*)malloc(sizeof(struct CircularQueue));
+  if(*q == NULL) {
+    Serial.println("ERROR: malloc queue failed");
     qError = 1;
     return;
   }
   
-  *D = (dStack*)malloc(sizeof(struct dStack));
-  if(*D == NULL){
-    Serial.println("ERROR: malloc D failed");
+  (*q)->values = (float*)calloc(capacity, sizeof(float));
+  if((*q)->values == NULL) {
+    Serial.println("ERROR: calloc values failed");
+    free(*q);
+    *q = NULL;
     qError = 1;
     return;
   }
   
-  float* dataQ = (float*)calloc(sizeOfStack, sizeof(float));
-  if(dataQ == NULL){
-    Serial.println("ERROR: calloc dataQ failed");
+  (*q)->maxDeque = (int*)calloc(capacity, sizeof(int));
+  if((*q)->maxDeque == NULL) {
+    Serial.println("ERROR: calloc maxDeque failed");
+    free((*q)->values);
+    free(*q);
+    *q = NULL;
     qError = 1;
     return;
   }
   
-  float* dataD = (float*)calloc(sizeOfStack, sizeof(float));
-  if(dataD == NULL){
-    Serial.println("ERROR: calloc dataD failed");
-    qError = 1;
-    return;
-  } 
+  (*q)->capacity = capacity;
+  (*q)->qHead = 0;
+  (*q)->qTail = 0;
+  (*q)->qSize = 0;
+  (*q)->dHead = 0;
+  (*q)->dTail = 0;
   
-  Serial.println("Memory allocation successful!");
-  initStack(*Q, sizeOfStack, dataQ);
-  initStack(*D, sizeOfStack, dataD);
-  (*Q)->numElems = 0;
-  Serial.println("Stack initialization complete");
+  Serial.println("Circular queue initialization complete");
+}
+
+void freeCircularQueue(struct CircularQueue *q) {
+  if(q != NULL) {
+    if(q->values != NULL) free(q->values);
+    if(q->maxDeque != NULL) free(q->maxDeque);
+    free(q);
+  }
 }
 
 void setup() {
@@ -121,7 +119,8 @@ void setup() {
   pinMode(EXHAUST_ON_PIN, INPUT_PULLUP);
   pinMode(EXHAUST_OFF_PIN, INPUT_PULLUP);
   
-  initializeQ(&Q, &D);
+  int queueCapacity = MAX_VAL_PERIOD_SEC + 5;
+  initCircularQueue(&queue, queueCapacity);
   
   if(qError == 0){
     lcd.clear();
@@ -156,31 +155,31 @@ void loop() {
   
   if (millis() - queueTimer > 1000){
     // сюда заходим раз в секунду
-    if(Q != NULL && D != NULL){
+    if(queue != NULL){
       if(firstRun){
         Serial.println("First enqueue operation");
         firstRun = false;
       }
       
-      Enqueue(Q, D, maxPressInSec);
+      enqueue(queue, maxPressInSec);
       Serial.print("ENQ: val=");
       Serial.print(maxPressInSec, 2);
       Serial.print(" | qSize=");
-      Serial.print(Q->numElems);
+      Serial.print(getQueueSize(queue));
       
-      if (Q->numElems > MAX_VAL_PERIOD_SEC){
-         float dequeued = Dequeue(Q, D);
+      if (getQueueSize(queue) > MAX_VAL_PERIOD_SEC){
+         float dequeued = dequeue(queue);
          Serial.print(" | DEQ=");
          Serial.print(dequeued, 2);
       }
       
-      float maxVal = Maximum(D);
+      float maxVal = getMaximum(queue);
       Serial.print(" | MAX=");
       Serial.println(maxVal, 2);
       
       updateMax(maxVal);
     } else {
-      Serial.println("ERROR: Q or D is NULL in loop");
+      Serial.println("ERROR: queue is NULL in loop");
     }
     maxPressInSec = 0;
     queueTimer = millis();
@@ -299,10 +298,13 @@ float convertToVolts(int x){
 }
 
 float getPressureFromAnalog(int x){
-  if (x > SENSOR_MAP[SENSOR_MAP_SIZE - 1][0]){
-    return SENSOR_MAP[SENSOR_MAP_SIZE][1];
+  if (x >= SENSOR_MAP[SENSOR_MAP_SIZE - 1][0]){
+    return SENSOR_MAP[SENSOR_MAP_SIZE - 1][1];
   }
-
+  if (x <= SENSOR_MAP[0][0]){
+    return SENSOR_MAP[0][1];
+  }
+  
   int target = 0;
   for (int i = 1; i < SENSOR_MAP_SIZE; i++){
     if (SENSOR_MAP[i][0] > x){
@@ -356,172 +358,142 @@ void fillBar2(byte start_pos, byte row, byte bar_length, byte fill_percent) {
 }
 
 
-void initStack(struct dStack *s, long nel, float *data) {
-    s->data = data;
-    s->cap = nel;
-    s->top1 = 0;
-    s->top2 = nel - 1;
+// ========== Вспомогательные функции ==========
+
+int isQueueEmpty(struct CircularQueue *q) {
+  return (q->qSize == 0);
 }
 
-int stackEmpty1(struct dStack* s) {
-    if(s->top1 == (long)0)
-        return 1;
-    else
-        return 0;
+int isQueueFull(struct CircularQueue *q) {
+  return (q->qSize >= q->capacity);
 }
 
-int stackEmpty2(struct dStack *s) {
-    if(s->top2 == s->cap - 1)
-        return 1;
-    else
-        return 0;
+int getQueueSize(struct CircularQueue *q) {
+  return q->qSize;
 }
 
-void push1(struct dStack *s, float x) {
-    if(s->top2 < s->top1){
-        Serial.println("push1 overflow");
-        return;
+// Размер дека максимумов
+int dequeSize(struct CircularQueue *q) {
+  if(q->dTail >= q->dHead) {
+    return q->dTail - q->dHead;
+  } else {
+    return q->capacity - q->dHead + q->dTail;
+  }
+}
+
+// Получить индекс с головы дека максимумов
+int dequeFront(struct CircularQueue *q) {
+  if(dequeSize(q) == 0) {
+    Serial.println("ERROR: deque is empty (front)");
+    return -1;
+  }
+  return q->maxDeque[q->dHead];
+}
+
+// Получить индекс с хвоста дека максимумов
+int dequeBack(struct CircularQueue *q) {
+  if(dequeSize(q) == 0) {
+    Serial.println("ERROR: deque is empty (back)");
+    return -1;
+  }
+  int idx = (q->dTail - 1 + q->capacity) % q->capacity;
+  return q->maxDeque[idx];
+}
+
+// Удалить элемент с головы дека максимумов
+void dequePopFront(struct CircularQueue *q) {
+  if(dequeSize(q) > 0) {
+    q->dHead = (q->dHead + 1) % q->capacity;
+  }
+}
+
+// Удалить элемент с хвоста дека максимумов
+void dequePopBack(struct CircularQueue *q) {
+  if(dequeSize(q) > 0) {
+    q->dTail = (q->dTail - 1 + q->capacity) % q->capacity;
+  }
+}
+
+// Добавить элемент в хвост дека максимумов
+void dequePushBack(struct CircularQueue *q, int idx) {
+  q->maxDeque[q->dTail] = idx;
+  q->dTail = (q->dTail + 1) % q->capacity;
+}
+
+// ========== Основные функции очереди ==========
+
+void enqueue(struct CircularQueue *q, float value) {
+  if(q == NULL) {
+    Serial.println("ERROR: queue is NULL in enqueue");
+    qError = 3;
+    return;
+  }
+  
+  if(isQueueFull(q)) {
+    Serial.println("WARNING: queue is full, cannot enqueue");
+    return;
+  }
+  
+  // Добавляем значение в очередь
+  q->values[q->qTail] = value;
+  int newIdx = q->qTail;
+  q->qTail = (q->qTail + 1) % q->capacity;
+  q->qSize++;
+  
+  // Поддерживаем монотонно убывающий дек для максимумов
+  // Удаляем с хвоста все элементы меньше текущего
+  while(dequeSize(q) > 0) {
+    int backIdx = dequeBack(q);
+    if(q->values[backIdx] < value) {
+      dequePopBack(q);
+    } else {
+      break;
     }
-    s->data[s->top1] = x;
-    s->top1 += 1;
+  }
+  
+  // Добавляем текущий индекс в хвост дека
+  dequePushBack(q, newIdx);
 }
 
-void push2(struct dStack *s, float x) {
-    if(s->top2 < s->top1){
-        Serial.println("push2 overflow");
-        return;
-    }
-    s->data[s->top2] = x;
-    s->top2 -= 1;
+float dequeue(struct CircularQueue *q) {
+  if(q == NULL) {
+    Serial.println("ERROR: queue is NULL in dequeue");
+    qError = 3;
+    return 0.0;
+  }
+  
+  if(isQueueEmpty(q)) {
+    Serial.println("ERROR: queue is empty in dequeue");
+    qError = 2;
+    return 0.0;
+  }
+  
+  // Получаем значение с головы очереди
+  float value = q->values[q->qHead];
+  int oldIdx = q->qHead;
+  q->qHead = (q->qHead + 1) % q->capacity;
+  q->qSize--;
+  
+  // Если удаляемый элемент был максимумом, удаляем его из дека
+  if(dequeSize(q) > 0 && dequeFront(q) == oldIdx) {
+    dequePopFront(q);
+  }
+  
+  return value;
 }
 
-float pop1(struct dStack *s) {
-    if(stackEmpty1(s) == 1){
-        Serial.println("ERROR: pop1 empty");
-        return 0.0;
-    }
-    s->top1 -= 1;
-    float x = s->data[s->top1];
-    return x;
-}
-
-float pop2(struct dStack *s) {
-    if (stackEmpty2(s) == 1){
-        Serial.println("ERROR: pop2 empty");
-        return 0.0;
-    }
-    s->top2 += 1;
-    float x = s->data[s->top2];
-    return x;
-}
-
-int queueEmpty(struct dStack *s) {
-    if(stackEmpty1(s) == 1 && stackEmpty2(s) == 1)
-        return 1;
-    else
-        return 0;
-}
-
-float popQueue(struct dStack *s) { //also deck pop from end
-    if(stackEmpty2(s) == 1)
-        while (stackEmpty1(s) == 0)
-            push2(s, pop1(s));
-    float x = pop2(s);
-    return x;
-}
-
-float getRearElementDeq(struct dStack *D) {
-    if(D->top2 + 1 < D->cap){
-        return D->data[D->top2 + 1];
-    }
-    else{
-        return D->data[0];
-    }
-}
-
-float getFirstElementDeq(struct dStack *D) {
-    float res;
-    if(D->top1 != 0)
-        res =  D->data[D->top1 - 1];
-    else
-        res = D->data[D->cap - 1];
-    return res;
-}
-
-float getFirstElementQue(struct dStack *Q) {
-    if(Q->top2 == Q->cap - 1)
-        return Q->data[0];
-    else
-        return Q->data[Q->top2 + 1];
-}
-
-float popFrontDeque(struct dStack *D) {
-    if(stackEmpty1(D) == 1)
-        while (stackEmpty2(D) == 0)
-            push1(D, pop2(D));
-    float x = pop1(D);
-    return x;
-}
-
-void Enqueue(struct dStack *Q, struct dStack *D, float x) {
-    if(Q == NULL || D == NULL){
-        Serial.println("ERROR: Q or D is NULL");
-        qError = 3;
-        return;
-    }
-    
-    if(queueEmpty(Q) == 1){
-        push1(Q, x);
-        push2(D, x);
-    }
-    else{
-        push1(Q, x);
-        while((getRearElementDeq(D) < x) && (queueEmpty(D) == 0)){
-            if(stackEmpty2(D) == 0){
-                pop2(D);
-            } else{
-                // Перемещаем один элемент из stack1 в stack2, затем pop
-                if(stackEmpty1(D) == 0){
-                    push2(D, pop1(D));
-                    pop2(D);
-                }
-            }
-        }
-        push2(D, x);
-    }
-    Q->numElems++;
-}
-
-float Dequeue(struct dStack *Q, struct dStack *D) {
-    float res;
-    if(Q == NULL || D == NULL){
-        Serial.println("ERROR: Q or D is NULL in Dequeue");
-        qError = 3;
-        return 0.0;
-    }
-    if (Q->numElems == 0){
-      qError = 2;
-      Serial.println("ERROR: Queue is empty");
-      return 0.0;
-    }
-    if(getFirstElementDeq(D) == getFirstElementQue(Q)){
-        res = popQueue(Q);
-        popFrontDeque(D);
-    } else{
-        res = popQueue(Q);
-    }
-    Q->numElems--;
-    return res;
-}
-
-float Maximum(struct dStack *D) {
-    if(D == NULL){
-        Serial.println("ERROR: D is NULL in Maximum");
-        qError = 3;
-        return 0.0;
-    }
-    if(queueEmpty(D) == 1){
-        return 0.0;
-    }
-    return getFirstElementDeq(D);
+float getMaximum(struct CircularQueue *q) {
+  if(q == NULL) {
+    Serial.println("ERROR: queue is NULL in getMaximum");
+    qError = 3;
+    return 0.0;
+  }
+  
+  if(isQueueEmpty(q) || dequeSize(q) == 0) {
+    return 0.0;
+  }
+  
+  // Максимум всегда в голове дека
+  int maxIdx = dequeFront(q);
+  return q->values[maxIdx];
 }
